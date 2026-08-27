@@ -1,5 +1,7 @@
 # @zoreal/oauth2-react-native
 
+[![npm](https://img.shields.io/npm/v/@zoreal/oauth2-react-native)](https://www.npmjs.com/package/@zoreal/oauth2-react-native) [![npm downloads](https://img.shields.io/npm/dm/@zoreal/oauth2-react-native)](https://www.npmjs.com/package/@zoreal/oauth2-react-native) [![types](https://img.shields.io/npm/types/@zoreal/oauth2-react-native)](https://www.npmjs.com/package/@zoreal/oauth2-react-native) [![CI](https://img.shields.io/github/actions/workflow/status/Bynn-Intelligence/zoreal-oauth2-react-native/ci.yml?branch=main&label=CI)](https://github.com/Bynn-Intelligence/zoreal-oauth2-react-native/actions/workflows/ci.yml) [![License: MIT](https://img.shields.io/badge/license-MIT-blue.svg)](./LICENSE)
+
 Login with ZOREAL for React Native: a ZOREAL Verified Proof-of-Human behind
 every sign-in, for mobile relying-party apps.
 
