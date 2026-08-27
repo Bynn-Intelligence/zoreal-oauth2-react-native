@@ -9,13 +9,6 @@ integration twice by renaming imports. Zero native modules and zero runtime
 dependencies: everything runs on `fetch` and React Native's `Linking` and
 `AppState`.
 
-## Status
-
-Early release. The package implements wire protocol v1. The hosted ZOREAL
-login service is still rolling out, so treat this as a preview: the API is
-stable, but end-to-end sign-in against production is not available everywhere
-yet. This note is removed once the service is generally available.
-
 ## Install
 
 ```sh
