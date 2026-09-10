@@ -175,6 +175,168 @@ describe('the QR surface (tablet, or display: "qr")', () => {
   });
 });
 
+describe('the animated QR code', () => {
+  const BARE_QR = `${ISSUER}/pair/r1/qr.svg`;
+
+  const qrPair = (extra: Record<string, unknown> = {}) => () =>
+    json({
+      request_id: 'r1',
+      pair_url: 'https://zoreal.com/login/r1',
+      expires_in: 120,
+      display: 'qr',
+      ...extra,
+    });
+
+  const pending = () => json({ status: 'pending', expires_in: 118 });
+
+  /** Runs a QR pairing that never resolves, so the frames can be watched. */
+  const startQrFlow = (routes: Parameters<typeof routeFetch>[0]) => {
+    const controller = new AbortController();
+    const states: PairingState[] = [];
+    routeFetch(routes);
+    const done = runLoginFlow(
+      CTX,
+      {
+        flow: 'auth-code',
+        display: 'qr',
+        onCode: vi.fn(),
+        onPairingStateChange: (s) => states.push(s),
+      },
+      controller,
+      makePairingStore().setPairing
+    );
+    return { controller, states, done };
+  };
+
+  /**
+   * Lets the pairing get off the ground without moving the clock: generating
+   * the PKCE challenge and creating the pairing take several turns of the
+   * event loop, and the frame cadence below is asserted to the millisecond.
+   */
+  const settle = async () => {
+    for (let i = 0; i < 10; i++) await vi.advanceTimersByTimeAsync(0);
+  };
+
+  const stop = async (run: { controller: AbortController; done: Promise<void> }) => {
+    run.controller.abort();
+    await vi.advanceTimersByTimeAsync(0);
+    await run.done;
+  };
+
+  it('resolves the surface before the pairing exists and sends it as display', async () => {
+    const fetchMock = routeFetch({ pair: qrPair() });
+
+    await runLoginFlow(
+      CTX,
+      { flow: 'browser-direct', display: 'qr', onCredential: vi.fn() },
+      new AbortController(),
+      makePairingStore().setPairing
+    );
+
+    const pairBody = JSON.parse(
+      fetchMock.mock.calls.find(([u]) => String(u).endsWith('/pair'))![1]!.body as string
+    );
+    expect(pairBody.display).toBe('qr');
+  });
+
+  it('sends display "link" from a phone and opens pair_url with its start token untouched', async () => {
+    const startLink = 'https://zoreal.com/login/r1?t=8ZQ4RC5T9WPX2K7NM3HJ0VBD';
+    const fetchMock = routeFetch({
+      pair: () => json({ request_id: 'r1', pair_url: startLink, expires_in: 120, display: 'link' }),
+    });
+    const states: PairingState[] = [];
+
+    await runLoginFlow(
+      CTX,
+      { flow: 'browser-direct', onCredential: vi.fn(), onPairingStateChange: (s) => states.push(s) },
+      new AbortController(),
+      makePairingStore().setPairing
+    );
+
+    const pairBody = JSON.parse(
+      fetchMock.mock.calls.find(([u]) => String(u).endsWith('/pair'))![1]!.body as string
+    );
+    expect(pairBody.display).toBe('link');
+    // Verbatim, query string included: the start token is what lets this
+    // pairing be claimed at all.
+    expect(Linking.openURL).toHaveBeenCalledWith(startLink);
+    expect(states[0].pairUrl).toBe(startLink);
+    // And no QR is offered for it: the provider serves none for a link pairing.
+    expect(states[0].qrUrl).toBeUndefined();
+    expect(states[0].qrRefreshSeconds).toBeUndefined();
+  });
+
+  it('publishes a fresh frame on the cadence the provider asked for', async () => {
+    vi.useFakeTimers();
+    const run = startQrFlow({ pair: qrPair({ qr_refresh_seconds: 5 }), status: pending });
+
+    await settle();
+    expect(run.states[0].qrUrl).toBe(BARE_QR);
+    expect(run.states[0].qrRefreshSeconds).toBe(5);
+
+    // The poll publishes states of its own every two seconds. None of them is
+    // a new frame until the refresh actually falls due.
+    await vi.advanceTimersByTimeAsync(4999);
+    expect(run.states.every((s) => s.qrUrl === BARE_QR)).toBe(true);
+
+    await vi.advanceTimersByTimeAsync(1);
+    const framed = run.states[run.states.length - 1];
+    expect(framed.status).toBe('pending');
+    expect(framed.qrUrl!.startsWith(`${BARE_QR}?t=`)).toBe(true);
+    expect(framed.qrUrl).toMatch(/\?t=\d+$/);
+
+    // Again on the same cadence, and never the same URL twice: an image cache
+    // keyed on the URL would otherwise keep showing the spent frame.
+    await vi.advanceTimersByTimeAsync(5000);
+    expect(run.states[run.states.length - 1].qrUrl).not.toBe(framed.qrUrl);
+
+    await stop(run);
+  });
+
+  it('falls back to three seconds when the provider states no cadence', async () => {
+    vi.useFakeTimers();
+    const run = startQrFlow({ pair: qrPair(), status: pending });
+
+    await settle();
+    expect(run.states[0].qrRefreshSeconds).toBe(3);
+
+    await vi.advanceTimersByTimeAsync(2999);
+    expect(run.states.every((s) => s.qrUrl === BARE_QR)).toBe(true);
+
+    await vi.advanceTimersByTimeAsync(1);
+    expect(run.states[run.states.length - 1].qrUrl).toMatch(/\?t=\d+$/);
+
+    await stop(run);
+  });
+
+  it('stops refreshing once the pairing is claimed: the code is spent', async () => {
+    vi.useFakeTimers();
+    const statuses = [
+      { status: 'pending', expires_in: 118 },
+      { status: 'pending', expires_in: 116 },
+      { status: 'claimed', expires_in: 179 },
+    ];
+    const run = startQrFlow({
+      pair: qrPair({ qr_refresh_seconds: 1 }),
+      status: () => json(statuses.length > 1 ? statuses.shift() : statuses[0]),
+    });
+
+    // Claimed on the third poll, at four seconds, with a frame every second
+    // until then.
+    await vi.advanceTimersByTimeAsync(4100);
+    const seen = new Set(run.states.map((s) => s.qrUrl));
+    expect(seen.size).toBeGreaterThan(2);
+    expect(run.states.some((s) => s.status === 'claimed')).toBe(true);
+
+    // The poll keeps running while the holder approves on the phone; the
+    // frames do not.
+    await vi.advanceTimersByTimeAsync(30_000);
+    expect(new Set(run.states.map((s) => s.qrUrl)).size).toBe(seen.size);
+
+    await stop(run);
+  });
+});
+
 describe('failure surfacing', () => {
   it('reports a denial as request_denied and never calls onSuccess', async () => {
     routeFetch({ status: () => json({ status: 'denied' }) });

@@ -156,15 +156,14 @@ On a phone the same-device link is the whole story. Where the approving phone
 is a *second* device (a tablet kiosk, a TV), the user scans a QR instead. The
 SDK detects `Platform.isPad` / `Platform.isTV`, or you force it with
 `display: 'qr'`, and it then does not open any link: it hands you the pairing
-URL through `onPairingStateChange` and polling continues as normal.
+surface through `onPairingStateChange` and polling continues as normal.
 
 ```tsx
 const login = useZorealLogin({
   display: 'qr',
   onPairingStateChange: (s) => {
-    // s.pairUrl  -> encode with the QR renderer of your choice
-    // s.qrUrl    -> the provider-served SVG of the same URL, if your surface
-    //               can show SVG (React Native's <Image> cannot)
+    // s.qrUrl    -> the QR image to show, served by the provider as an SVG.
+    //               A NEW URL on every state: render the one you are handed.
     // s.status   -> 'pending' | 'claimed' | 'approved' | ... drive your UI
     // s.cancel() -> wire to your close control
   },
@@ -172,8 +171,20 @@ const login = useZorealLogin({
 });
 ```
 
-This package deliberately ships no QR renderer: pulling an SVG dependency
-into every install to serve the minority surface would be backwards.
+The code on screen is not a still image. It changes every few seconds, and the
+provider refuses a frame that has aged out, so a screenshot forwarded to
+somebody else is spent before they can scan it: only the live screen works.
+That is also the one thing a QR screen has to get right. Render the `qrUrl` of
+the state you were just handed, every time, and never keep showing the first
+one, or the code on your screen quietly stops being claimable.
+`s.qrRefreshSeconds` tells you the cadence if you want to preload or
+cross-fade. A code you generate yourself from `s.pairUrl` carries no frame at
+all, and the provider refuses it.
+
+This package still ships no QR renderer: the image comes from the provider, so
+a `WebView` or `react-native-svg`'s `SvgUri` pointed at `s.qrUrl` is the whole
+QR screen, and pulling a rendering dependency into every install to serve the
+minority surface would be backwards.
 
 ## What each export does
 
@@ -182,7 +193,7 @@ into every install to serve the minority surface would be backwards.
 | `ZorealOAuthProvider` | Context: `clientId`, optional `issuer` (sandbox), optional `locale` |
 | `useZorealLogin(options)` | Returns a `login()` function. `flow: 'auth-code'` hands `{ code, code_verifier, nonce, scope, app_state }` to `onSuccess`; the default browser-direct flow exchanges the code itself (public client, PKCE, no secret) and hands over `{ credential, select_by, acr }` |
 | `ZorealLoginButton` | The drop-in `Pressable`, browser-direct flow only |
-| `onPairingStateChange` | Every pairing state, plus `pairUrl` / `qrUrl` / `cancel`, for caller-rendered UI |
+| `onPairingStateChange` | Every pairing state, plus `pairUrl` / `qrUrl` / `qrRefreshSeconds` / `cancel`, for caller-rendered UI. `qrUrl` is a fresh frame each time; render the current one |
 | `zorealLogout()` | Clears SDK-held local state. Local only: it cannot and does not end the holder's ZOREAL session |
 | `hasGrantedAllScopesZoreal` / `hasGrantedAnyScopeZoreal` | Scope checks on a code response |
 

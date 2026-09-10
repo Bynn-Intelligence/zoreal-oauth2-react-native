@@ -41,6 +41,30 @@ describe('startPairing', () => {
     expect(body.sdk).toMatch(/^@zoreal\/oauth2-react-native\/\d+\.\d+\.\d+$/);
   });
 
+  it('sends the surface the caller resolved, and omits it when there is none', async () => {
+    const fetchMock = vi
+      .spyOn(globalThis, 'fetch')
+      .mockResolvedValue(
+        json({ request_id: 'r1', pair_url: 'https://zoreal.com/login/r1', expires_in: 120 })
+      );
+    const params = {
+      client_id: 'ast_x',
+      scope: 'openid',
+      state: 's',
+      nonce: 'n',
+      code_challenge: 'c',
+    };
+
+    await startPairing(ISSUER, { ...params, display: 'qr' });
+    expect(JSON.parse(fetchMock.mock.calls[0][1]!.body as string).display).toBe('qr');
+
+    // No display is the legacy pairing, and it must stay absent rather than
+    // travel as null: the provider tells the two apart.
+    await startPairing(ISSUER, params);
+    const legacy = JSON.parse(fetchMock.mock.calls[1][1]!.body as string);
+    expect('display' in legacy).toBe(false);
+  });
+
   it("surfaces the provider's refusal verbatim", async () => {
     vi.spyOn(globalThis, 'fetch').mockResolvedValue(
       json({ error: 'access_denied', error_description: 'sdk 0.0.9 is refused: CVE-XXXX' }, 400)

@@ -53,17 +53,33 @@ export interface PairingState {
   /** Present while status is 'enrolling'. Enrolment extends the window well beyond a normal login. */
   enrolmentDeadline?: number;
   /**
-   * The pairing link. On a phone the SDK opens it itself; where a QR belongs
-   * (a tablet, a shared display, display: 'qr'), render this with the QR
-   * library of your choice. Present on every callback of a pairing flow.
+   * The pairing link. On a phone the SDK opens it itself, and it carries a
+   * start token that ties the claim to this login, so pass it around
+   * unmodified. In QR mode it is the address behind the code rather than
+   * something to draw: a QR you generate from this string is a code with no
+   * frame, which the provider refuses. Show qrUrl instead.
+   * Present on every callback of a pairing flow.
    */
   pairUrl?: string;
   /**
-   * The provider-served SVG image of pairUrl, for surfaces that can show an
-   * SVG (a WebView, or a web embed). React Native's Image cannot render SVG:
-   * on a native screen, draw pairUrl with your own QR renderer instead.
+   * The QR image to show, served by the provider as an SVG.
+   *
+   * IT CHANGES. In QR mode this is one frame of a rolling code: a new URL
+   * arrives with every state, roughly every qrRefreshSeconds, and the
+   * provider stops accepting a frame that has aged out. Render the qrUrl of
+   * the state you are given, every time; caching the first one leaves a code
+   * on screen that quietly stops working within the minute. That is the point
+   * of the design: a screenshot of the code is worth nothing to someone who
+   * receives it seconds later.
+   *
+   * React Native's Image does not decode SVG, so point an SVG-capable
+   * renderer at this URL (react-native-svg's SvgUri, or a WebView).
+   *
+   * Absent in app-link mode, where the provider serves no QR at all.
    */
   qrUrl?: string;
+  /** QR mode: how often qrUrl changes, in seconds. Useful for a preload or a fade. */
+  qrRefreshSeconds?: number;
   /** True when the flow opened the app link (same device) rather than showing a QR. */
   appLink?: boolean;
   /** Abandons this pairing: stops the poll. Wire it to your UI's cancel control. */
@@ -89,6 +105,12 @@ export interface ZorealLoginRequestOptions {
    * 'auto' opens the app link on a phone and exposes the QR surface on a
    * tablet or TV. 'link' forces the app link; 'qr' forces the QR surface and
    * leaves rendering it to you, via onPairingStateChange.
+   *
+   * The resolved answer is sent when the pairing is created and the provider
+   * binds the pairing to it: a QR pairing is claimable only from a live frame
+   * of its own code, an app-link pairing only from the link it handed back.
+   * Forcing the surface your screen does not actually show is therefore a
+   * login that cannot be completed, not a cosmetic mismatch.
    */
   display?: 'auto' | 'qr' | 'link';
   /** Called on each pairing state change. Drive your own UI from this if you render one. */

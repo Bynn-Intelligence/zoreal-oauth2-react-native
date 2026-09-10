@@ -18,6 +18,7 @@
 
 import { Linking, Platform } from 'react-native';
 import { unsafeClaims } from './jwt';
+import { DEFAULT_QR_REFRESH_SECONDS } from './wire';
 import {
   FlowAbandonedError,
   OAuthFlowError,
@@ -41,7 +42,8 @@ import type {
 export interface ActivePairing {
   requestId: string;
   pairUrl: string;
-  qrUrl: string;
+  /** QR surface only, and it changes with every frame. Absent in app-link mode. */
+  qrUrl?: string;
   state: PairingState;
   /** True when the flow opened the app link rather than exposing the QR surface. */
   appLink: boolean;
@@ -77,7 +79,9 @@ export interface FlowContext {
  * A tablet or TV is where a QR belongs: the phone that approves is a second
  * device. A phone gets the app link. Platform.isPad and Platform.isTV are the
  * two signals React Native provides without a native module; display: 'qr'
- * or 'link' overrides the guess.
+ * or 'link' overrides the guess. Whatever this resolves to is sent to the
+ * provider and binds the pairing, so a wrong guess is a login that refuses to
+ * be claimed rather than one that quietly falls back.
  */
 function isLargeFormFactor(): boolean {
   const platform = Platform as unknown as { isPad?: boolean; isTV?: boolean };
@@ -94,6 +98,15 @@ export async function runLoginFlow(
   const state = generateState();
   const nonce = generateState();
 
+  // Which surface this login will use, decided BEFORE the pairing exists: the
+  // provider binds the pairing to the answer and enforces it on the claim, so
+  // it cannot be a decision taken once the response is back.
+  const useQr = opts.display === 'qr' || (opts.display !== 'link' && isLargeFormFactor());
+
+  // Set once the QR frame loop starts. The finally below is what stops it, on
+  // every exit there is: approval, refusal, cancel, unmount, abort.
+  let stopQrFrames: () => void = () => {};
+
   try {
     const started = await startPairing(ctx.issuer, {
       client_id: ctx.clientId,
@@ -106,6 +119,7 @@ export async function runLoginFlow(
       max_age: opts.max_age,
       prompt: opts.prompt,
       locale: ctx.locale,
+      display: useQr ? 'qr' : 'link',
     });
 
     let code: string;
@@ -116,27 +130,54 @@ export async function runLoginFlow(
       code = started.code;
       selectBy = 'session';
     } else {
-      const useQr = opts.display === 'qr' || (opts.display !== 'link' && isLargeFormFactor());
       selectBy = useQr ? 'qr' : 'app_link';
 
       const cancel = () => {
         controller.abort();
         setPairing(null);
       };
+
+      const qrEndpoint = `${ctx.issuer}/pair/${encodeURIComponent(started.request_id)}/qr.svg`;
+      const refreshSeconds =
+        typeof started.qr_refresh_seconds === 'number' && started.qr_refresh_seconds > 0
+          ? started.qr_refresh_seconds
+          : DEFAULT_QR_REFRESH_SECONDS;
+      // App-link mode gets no qrUrl at all. The provider serves no QR for a
+      // pairing bound to the same-device link, so handing one over would be
+      // handing over an image that 404s, and a code drawn from the link
+      // instead is one the app is meant to refuse.
+      let qrUrl: string | undefined = useQr ? qrEndpoint : undefined;
+
       // Everything a caller-rendered pairing UI needs, on every state it
-      // sees: the QR surface cannot complete unless SOMETHING renders
-      // pairUrl, and on native that something is always the caller.
-      const surface = {
+      // sees: the QR surface cannot complete unless SOMETHING renders the
+      // image, and on native that something is always the caller. Read fresh
+      // each time, because qrUrl moves.
+      const surface = () => ({
         pairUrl: started.pair_url,
-        qrUrl: `${ctx.issuer}/pair/${encodeURIComponent(started.request_id)}/qr.svg`,
+        qrUrl,
+        qrRefreshSeconds: useQr ? refreshSeconds : undefined,
         appLink: !useQr,
         cancel,
+      });
+
+      let published: PairingState = {
+        status: 'pending',
+        expiresIn: started.expires_in,
+        ...surface(),
       };
+      const publish = (next: PairingState) => {
+        published = next;
+        setPairing((p) =>
+          p && p.requestId === started.request_id ? { ...p, qrUrl, state: next } : p
+        );
+        opts.onPairingStateChange?.(next);
+      };
+
       const active: ActivePairing = {
         requestId: started.request_id,
-        pairUrl: surface.pairUrl,
-        qrUrl: surface.qrUrl,
-        state: { status: 'pending', expiresIn: started.expires_in, ...surface },
+        pairUrl: started.pair_url,
+        qrUrl,
+        state: published,
         appLink: !useQr,
         cancel,
       };
@@ -144,6 +185,42 @@ export async function runLoginFlow(
       // The initial state, immediately: the first poll response is one
       // round-trip away, and a UI that waits for it opens visibly empty.
       opts.onPairingStateChange?.(active.state);
+
+      // The QR animates. Each fetch of the image returns the frame that is
+      // current on the provider's clock, and the provider refuses a frame
+      // that has aged out, so a screenshot someone relays to a victim is
+      // spent long before they can act on it. Re-fetching on the provider's
+      // cadence is this package's whole part in that: the frames are rendered
+      // and keyed server side, and nothing here generates a code.
+      //
+      // The deadline moves in fixed steps rather than counting from each
+      // wake-up, so the cadence does not drift; a step that has already
+      // passed (the app was backgrounded) is moved forward instead of firing
+      // a burst of frames to catch up on a screen nobody was watching.
+      if (useQr) {
+        let timer: ReturnType<typeof setTimeout> | null = null;
+        let nextFrameAt = Date.now() + refreshSeconds * 1000;
+        const scheduleFrame = () => {
+          const now = Date.now();
+          if (nextFrameAt <= now) nextFrameAt = now + refreshSeconds * 1000;
+          timer = setTimeout(() => {
+            // The cache-buster is what makes the swap visible: an image cache
+            // keyed on the URL alone would keep showing the frame that has
+            // just expired.
+            qrUrl = `${qrEndpoint}?t=${Date.now()}`;
+            publish({ ...published, ...surface() });
+            nextFrameAt += refreshSeconds * 1000;
+            scheduleFrame();
+          }, nextFrameAt - now);
+        };
+        stopQrFrames = () => {
+          if (timer !== null) {
+            clearTimeout(timer);
+            timer = null;
+          }
+        };
+        scheduleFrame();
+      }
 
       if (!useQr) {
         // The universal link. Not awaited ahead of the poll: the OS may
@@ -163,11 +240,11 @@ export async function runLoginFlow(
         signal: controller.signal,
         expiresIn: started.expires_in,
         onState: (s) => {
-          const enriched = { ...s, ...surface };
-          setPairing((p) =>
-            p && p.requestId === started.request_id ? { ...p, state: enriched } : p
-          );
-          opts.onPairingStateChange?.(enriched);
+          // A pairing that has left 'pending' has spent its code: claimed and
+          // enrolling are on the phone now, and the rest are terminal. Frames
+          // past that point would be images nothing can claim.
+          if (s.status !== 'pending') stopQrFrames();
+          publish({ ...s, ...surface() });
         },
       });
     }
@@ -213,5 +290,7 @@ export async function runLoginFlow(
       type: 'unknown',
       description: e instanceof Error ? e.message : String(e),
     });
+  } finally {
+    stopQrFrames();
   }
 }

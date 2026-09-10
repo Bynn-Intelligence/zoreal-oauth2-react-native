@@ -22,6 +22,7 @@ import {
   POLL_INTERVAL_MS,
   SDK_VERSION,
   WIRE_VERSION,
+  type PairDisplay,
   type PairStartResponse,
   type PairStatusResponse,
   type TokenResponse,
@@ -73,6 +74,14 @@ export interface StartPairingParams {
   max_age?: number;
   prompt?: string;
   locale?: string;
+  /**
+   * The surface about to be shown, resolved before this call. The provider
+   * binds the pairing to it: a QR pairing is claimable only from a live frame
+   * of its own code, a link pairing only with the start token it hands back.
+   * Omitting it asks for the legacy static code, which is why the caller
+   * decides first rather than after the response arrives.
+   */
+  display?: PairDisplay;
 }
 
 async function parseJson(response: Response): Promise<Record<string, unknown>> {

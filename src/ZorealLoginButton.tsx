@@ -11,8 +11,9 @@ import type { NonOAuthError, ZorealButtonConfiguration, ZorealCredentialResponse
  * On a phone, pressing it opens the pairing link in the ZOREAL ID app (or the
  * pairing page, when the app is not installed) and the press resolves through
  * onSuccess when the user returns. Where a QR belongs (display: 'qr', or a
- * tablet), the button does not draw one: render pairUrl from
- * onPairingStateChange with the QR renderer of your choice.
+ * tablet), the button does not draw one: show the qrUrl from
+ * onPairingStateChange, which is the provider's image and moves on every few
+ * seconds, so render the one the latest state carries rather than the first.
  *
  * The copy is neutral: the button asserts nothing about a person who has not
  * yet authenticated.
