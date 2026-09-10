@@ -1,4 +1,14 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+
+/**
+ * The real timer, captured before any test installs fake ones. The fake
+ * clock's zero-length ticks drain promise callbacks, but work that finishes
+ * on the platform's thread pool (the PKCE digest goes through WebCrypto)
+ * is delivered by the event loop, and a tick that never reaches it leaves
+ * the flow waiting forever. Yielding through this between ticks lets it in.
+ */
+const realSetTimeout = globalThis.setTimeout;
+const yieldToEventLoop = () => new Promise<void>((resolve) => realSetTimeout(resolve, 1));
 import { runLoginFlow, type ActivePairing, type SetPairing } from '../src/flow';
 import { challengeS256 } from '../src/pkce';
 import type { PairingState, ZorealCodeResponse, ZorealCredentialResponse } from '../src/types';
@@ -234,12 +244,16 @@ describe('the animated QR code', () => {
    * machine is a race on the next.
    */
   const untilPublished = async (run: { states: PairingState[] }) => {
-    for (let i = 0; i < 200 && run.states.length === 0; i++) await vi.advanceTimersByTimeAsync(0);
+    for (let i = 0; i < 200 && run.states.length === 0; i++) {
+      await yieldToEventLoop();
+      await vi.advanceTimersByTimeAsync(0);
+    }
     if (run.states.length === 0) throw new Error('the flow never published a state');
   };
 
   const stop = async (run: { controller: AbortController; done: Promise<void> }) => {
     run.controller.abort();
+    await yieldToEventLoop();
     await vi.advanceTimersByTimeAsync(0);
     await run.done;
   };
