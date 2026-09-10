@@ -10,8 +10,22 @@ const CTX = { clientId: 'ast_x', issuer: ISSUER };
 const b64url = (s: string) => Buffer.from(s, 'utf8').toString('base64url');
 const ID_TOKEN = `${b64url('{"alg":"ES256"}')}.${b64url('{"acr":"zoreal.live","sub":"7QK3"}')}.sig`;
 
+/**
+ * A response shaped the way the code reads one (ok, status, json()), built
+ * without the platform's body streams. A real Response resolves json()
+ * through several stream promise hops, and how many of them a zero-length
+ * fake-timer tick drains differs by Node build: the frame tests passed on a
+ * Mac and failed on the Linux runners for that reason alone. This body
+ * settles in one hop, so a tick means the same thing everywhere.
+ */
 const json = (body: unknown, status = 200) =>
-  new Response(JSON.stringify(body), { status, headers: { 'Content-Type': 'application/json' } });
+  ({
+    ok: status >= 200 && status < 300,
+    status,
+    headers: new Headers({ 'Content-Type': 'application/json' }),
+    json: async () => body,
+    text: async () => JSON.stringify(body),
+  }) as unknown as Response;
 
 /** A stand-in for React state that records what the flow published. */
 const makePairingStore = () => {
@@ -213,8 +227,15 @@ describe('the animated QR code', () => {
    * the PKCE challenge and creating the pairing take several turns of the
    * event loop, and the frame cadence below is asserted to the millisecond.
    */
-  const settle = async () => {
-    for (let i = 0; i < 10; i++) await vi.advanceTimersByTimeAsync(0);
+  /**
+   * Drains zero-length ticks until the flow has published its first state,
+   * rather than a fixed number of them: the first publish sits behind the
+   * pairing request's promise chain, and a count that is enough on one
+   * machine is a race on the next.
+   */
+  const untilPublished = async (run: { states: PairingState[] }) => {
+    for (let i = 0; i < 200 && run.states.length === 0; i++) await vi.advanceTimersByTimeAsync(0);
+    if (run.states.length === 0) throw new Error('the flow never published a state');
   };
 
   const stop = async (run: { controller: AbortController; done: Promise<void> }) => {
@@ -270,7 +291,7 @@ describe('the animated QR code', () => {
     vi.useFakeTimers();
     const run = startQrFlow({ pair: qrPair({ qr_refresh_seconds: 5 }), status: pending });
 
-    await settle();
+    await untilPublished(run);
     expect(run.states[0].qrUrl).toBe(BARE_QR);
     expect(run.states[0].qrRefreshSeconds).toBe(5);
 
@@ -297,7 +318,7 @@ describe('the animated QR code', () => {
     vi.useFakeTimers();
     const run = startQrFlow({ pair: qrPair(), status: pending });
 
-    await settle();
+    await untilPublished(run);
     expect(run.states[0].qrRefreshSeconds).toBe(3);
 
     await vi.advanceTimersByTimeAsync(2999);
@@ -323,6 +344,7 @@ describe('the animated QR code', () => {
 
     // Claimed on the third poll, at four seconds, with a frame every second
     // until then.
+    await untilPublished(run);
     await vi.advanceTimersByTimeAsync(4100);
     const seen = new Set(run.states.map((s) => s.qrUrl));
     expect(seen.size).toBeGreaterThan(2);
