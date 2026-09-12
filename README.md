@@ -359,7 +359,7 @@ its single `onError`, shaped as a `NonOAuthError`.)
 | `/pair` | `onError` | `invalid_request` | Missing PKCE/nonce, an unverified sector, an unregistered `redirect_uri`, or an unknown `acr_values` |
 | `/pair` | `onError` | `login_required` | `prompt: 'none'` with no silent session to resume — the expected quiet outcome, not a failure |
 | pairing | `onNonOAuthError` | `request_denied` | The holder declined in their ZOREAL ID app — **not an error to alarm on**; offer to try again |
-| pairing | `onNonOAuthError` | `request_expired` | The pairing window elapsed (120s to claim, 180s after), or a required liveness the device could not meet — offer to try again |
+| pairing | `onNonOAuthError` | `request_expired` | The pairing window elapsed (the provider's: five minutes to claim, five minutes after), or a required liveness the device could not meet — offer to try again |
 
 The full set of `NonOAuthError.type` this SDK can emit:
 
