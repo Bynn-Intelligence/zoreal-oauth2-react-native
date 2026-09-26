@@ -3,7 +3,9 @@
  *
  * On a phone the pairing is SAME-DEVICE: the SDK opens the pairing URL (the
  * ZOREAL ID app claims it as a universal link; with no app installed the same
- * URL is the real pairing page in the browser), and this app keeps polling.
+ * URL opens a zoreal.com page in the browser that can only say to install the
+ * app, which is why the caller should ask first, see the README), and this app
+ * keeps polling.
  * The ZOREAL app never returns control by redirect; the poll below is what
  * completes the login when the user comes back.
  *
@@ -30,7 +32,8 @@ import {
 import type { ErrorCode, NonOAuthError, PairingState } from './types';
 
 /**
- * The pending window is 120 seconds and the claimed window 180. When the poll
+ * The windows are the provider's (five minutes pending and five claimed since
+ * 2026-09-12), read from every answer's expires_in. When the poll
  * cannot reach the provider (offline, or suspended in the background) it keeps
  * retrying at the normal cadence until this long past the last deadline the
  * provider stated, then gives up as request_expired: a stale return to the

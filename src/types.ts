@@ -173,6 +173,10 @@ export interface AuthCodeFlowOptions extends ZorealLoginRequestOptions {
   onSuccess?: (response: ZorealCodeResponse) => void;
   onError?: (error: Pick<NonOAuthError, 'description'> & { error: ErrorCode }) => void;
   onNonOAuthError?: (error: NonOAuthError) => void;
-  /** Must be registered for this client in the ZOREAL dashboard. */
+  /**
+   * Leave unset. The pairing never redirects, and a redirect_uri that is sent
+   * must be registered on the client or the provider refuses the login; an app
+   * asset registers none.
+   */
   redirect_uri?: string;
 }

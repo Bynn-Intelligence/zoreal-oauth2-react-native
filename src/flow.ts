@@ -5,8 +5,9 @@
  *
  * Same-device is the primary path on a phone: start the pairing, open the
  * pairing URL with Linking (the ZOREAL ID app claims it as a universal link;
- * with no app installed the same URL is the real pairing page, which can
- * enrol), and KEEP POLLING HERE. The ZOREAL app never returns control by
+ * with no app installed the same URL opens a zoreal.com page in the browser
+ * that can only say to install the app, so callers ask first, as the README's
+ * example does), and KEEP POLLING HERE. The ZOREAL app never returns control by
  * redirect; this app's poll is what completes the flow, including after a
  * round trip through the background.
  *
