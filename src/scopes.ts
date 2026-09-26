@@ -1,6 +1,6 @@
 import type { ZorealCodeResponse } from './types';
 
-/** Mirrors hasGrantedAllScopesGoogle for name-for-name portability. */
+/** True when the granted scope string carries every scope named. */
 export function hasGrantedAllScopesZoreal(
   response: Pick<ZorealCodeResponse, 'scope'>,
   firstScope: string,

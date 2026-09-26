@@ -38,7 +38,7 @@ describe('startPairing', () => {
     const body = JSON.parse(fetchMock.mock.calls[0][1]!.body as string);
     expect(body.code_challenge_method).toBe('S256');
     expect(body.wire_version).toBe(1);
-    expect(body.sdk).toMatch(/^@zoreal\/oauth2-react-native\/\d+\.\d+\.\d+$/);
+    expect(body.sdk).toMatch(/^@zoreal\/oauth2-react-native\/\d+\.\d+\.\d+(-[0-9A-Za-z.]+)?$/);
   });
 
   it('sends the surface the caller resolved, and omits it when there is none', async () => {

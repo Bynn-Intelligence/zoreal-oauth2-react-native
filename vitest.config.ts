@@ -8,6 +8,7 @@ export default defineConfig({
       // Tests run against a minimal mock of exactly the surface this package
       // touches; everything else under test is plain TypeScript over fetch.
       'react-native': new URL('./test/mocks/react-native.ts', import.meta.url).pathname,
+      'react-native-svg': new URL('./test/mocks/react-native-svg.ts', import.meta.url).pathname,
     },
   },
   test: {

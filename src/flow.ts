@@ -17,7 +17,9 @@
  * exchange with its client authentication.
  */
 
-import { Linking, Platform } from 'react-native';
+import { Linking } from 'react-native';
+import { isLargeFormFactor } from './installed';
+import { resolveIntent } from './intent';
 import { unsafeClaims } from './jwt';
 import { DEFAULT_QR_REFRESH_SECONDS } from './wire';
 import {
@@ -76,19 +78,6 @@ export interface FlowContext {
   locale?: string;
 }
 
-/**
- * A tablet or TV is where a QR belongs: the phone that approves is a second
- * device. A phone gets the app link. Platform.isPad and Platform.isTV are the
- * two signals React Native provides without a native module; display: 'qr'
- * or 'link' overrides the guess. Whatever this resolves to is sent to the
- * provider and binds the pairing, so a wrong guess is a login that refuses to
- * be claimed rather than one that quietly falls back.
- */
-function isLargeFormFactor(): boolean {
-  const platform = Platform as unknown as { isPad?: boolean; isTV?: boolean };
-  return platform.isPad === true || platform.isTV === true;
-}
-
 export async function runLoginFlow(
   ctx: FlowContext,
   opts: InternalFlowOptions,
@@ -103,6 +92,7 @@ export async function runLoginFlow(
   // provider binds the pairing to the answer and enforces it on the claim, so
   // it cannot be a decision taken once the response is back.
   const useQr = opts.display === 'qr' || (opts.display !== 'link' && isLargeFormFactor());
+  const intent = resolveIntent(opts.intent, opts.scope, opts.acr_values);
 
   // Set once the QR frame loop starts. The finally below is what stops it, on
   // every exit there is: approval, refusal, cancel, unmount, abort.
@@ -158,6 +148,7 @@ export async function runLoginFlow(
         qrUrl,
         qrRefreshSeconds: useQr ? refreshSeconds : undefined,
         appLink: !useQr,
+        intent,
         cancel,
       });
 

@@ -31,6 +31,7 @@ export function __appStateListenerCount(): number {
 
 export const Linking = {
   openURL: vi.fn(async (_url: string): Promise<void> => {}),
+  canOpenURL: vi.fn(async (_url: string): Promise<boolean> => true),
 };
 
 export const Platform: { OS: string; isPad?: boolean; isTV?: boolean } = {
@@ -44,12 +45,24 @@ export function __setPlatform(overrides: Partial<typeof Platform>): void {
   Object.assign(Platform, overrides);
 }
 
-// UI primitives: never rendered in these tests, present so importing the
-// button module does not explode.
-export const View = (_props: unknown): null => null;
-export const Text = (_props: unknown): null => null;
-export const Pressable = (_props: unknown): null => null;
+// Host components for the UI tests: react-test-renderer renders a string type
+// as a host element, so the tree can be walked by type and props without a
+// native runtime. Nothing here draws.
+export const View = 'View';
+export const Text = 'Text';
+export const Pressable = 'Pressable';
+export const Modal = 'Modal';
+export const ScrollView = 'ScrollView';
+export const ActivityIndicator = 'ActivityIndicator';
+
 export const StyleSheet = {
-  create: <T>(styles: T): T => styles,
+  create: <T,>(styles: T): T => styles,
   flatten: (style: unknown): unknown => style,
+  absoluteFill: {},
+  absoluteFillObject: {},
+  hairlineWidth: 1,
 };
+
+export function useColorScheme(): 'light' | 'dark' {
+  return 'light';
+}

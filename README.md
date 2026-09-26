@@ -7,21 +7,58 @@ every sign-in, for mobile relying-party apps.
 
 The API mirrors [`@zoreal/oauth2-react`](https://github.com/Bynn-Intelligence/zoreal-oauth2-react)
 one to one, so a team shipping both a web app and a native app writes the same
-integration twice by renaming imports. Zero native modules and zero runtime
-dependencies: everything runs on `fetch` and React Native's `Linking` and
-`AppState`.
+integration twice by renaming imports. It ships the same pieces: the button
+with the ZOREAL mark, and a pairing dialog the provider draws for you, in 39
+languages. No runtime dependencies: the protocol runs on `fetch` and React
+Native's `Linking` and `AppState`, and `react-native-svg`, which most apps
+already have, draws the mark and the QR.
 
 ## Install
 
 ```sh
-npm install @zoreal/oauth2-react-native
+npm install @zoreal/oauth2-react-native react-native-svg
 ```
 
-`react` (18 or 19) and `react-native` (0.73 or newer) are peer dependencies.
+`react` (18 or 19), `react-native` (0.73 or newer) and `react-native-svg` (13
+or newer) are peer dependencies. With Expo, `npx expo install react-native-svg`
+picks the version your SDK expects.
 
-One platform requirement: PKCE needs cryptographic randomness, and stock
-Hermes does not provide `crypto.getRandomValues`. If your app does not already
-polyfill it, add the standard one:
+### Let the app ask whether ZOREAL ID is installed
+
+On a phone the SDK checks for ZOREAL ID before it opens anything (see
+[How sign-in works on a phone](#how-sign-in-works-on-a-phone)). Both platforms
+answer that question truthfully only for a scheme your app declares, so
+declare `zorealid`:
+
+- **iOS**: `zorealid` in `LSApplicationQueriesSchemes` in `Info.plist`. With
+  Expo, in `app.json`:
+
+  ```json
+  { "expo": { "ios": { "infoPlist": { "LSApplicationQueriesSchemes": ["zorealid"] } } } }
+  ```
+
+- **Android 11 and later**: a `<queries>` entry in `AndroidManifest.xml` (with
+  Expo, a small config plugin that adds it):
+
+  ```xml
+  <queries>
+    <intent>
+      <action android:name="android.intent.action.VIEW" />
+      <data android:scheme="zorealid" />
+    </intent>
+  </queries>
+  ```
+
+The scheme is only asked about, never opened: the sign-in itself always goes
+through the https link or the QR. Without the declaration the check says "not
+installed" for everyone, and the dialog's "I already have ZOREAL ID" is the
+only way past it, so do not skip this.
+
+### Randomness
+
+PKCE needs cryptographic randomness, and stock Hermes does not provide
+`crypto.getRandomValues`. If your app does not already polyfill it, add the
+standard one:
 
 ```sh
 npm install react-native-get-random-values
@@ -44,20 +81,35 @@ comes from a ZOREAL **asset**.
 2. **Create an asset** of the kind **app**, with your app's bundle identifier
    (reverse-DNS, such as `com.example.app`). An asset is the thing people sign
    in to; its token is your `clientId` and it looks like `ast_...`. Your iOS and
-   Android builds share the one asset. The bundle identifier is what your
-   users' pairwise `sub` is derived from, so changing it later changes every
-   `sub` you have stored.
-3. On the asset, open the **OAuth2** tab:
-   - register **no redirect URIs and no JavaScript origins**. The pairing never
-     redirects anywhere, and a native app sends no Origin header: the provider
-     refuses an origin-less request from a client that has origins registered,
-     so a single origin on an app asset blocks every sign-in from your app.
-   - choose the **scopes** the client may request (see the catalogue below). An
-     app asset gets the Tier A scopes.
-   - choose **client authentication**. Leave the client public when the app
-     redeems the code itself (the button). Give your **backend** a client secret
-     (`client_secret_basic`) or a JWKS (`private_key_jwt`) when it does the
-     exchange (the auth-code flow). This package never holds a secret.
+   Android builds share the one asset.
+3. On the **Scopes** tab, choose the scopes the client may request (see the
+   catalogue below). An app registers **no redirect URIs and no JavaScript
+   origins**: the pairing never redirects anywhere, and a native app sends no
+   Origin header, so the provider refuses every sign-in from an app client that
+   has origins registered.
+4. On the **Keys** tab, choose client authentication. Leave the client public
+   when the app redeems the code itself (the button). Make it confidential, with
+   a client secret (`client_secret_basic`) or a JWKS (`private_key_jwt`), when
+   your **backend** does the exchange (the auth-code flow). This package never
+   holds a secret.
+5. To request personal data (email, name, and the rest of Tier B), **verify the
+   app** on the **Verification** tab. Enter the domain your app belongs to, add
+   the app to that domain's `.well-known` files (the same files iOS and Android
+   use for universal links; the tab shows the exact lines), and press Verify:
+   - iOS: `https://<your-domain>/.well-known/apple-app-site-association` lists
+     `<Team ID>.<bundle id>` under `applinks` or `webcredentials`.
+   - Android: `https://<your-domain>/.well-known/assetlinks.json` lists your
+     package name with the SHA-256 fingerprints of its signing keys (the upload
+     key and the Play app signing key).
+
+   One platform proven is enough, and the same fetch proves you control the
+   domain. With the app verified and the client confidential, the personal-data
+   scopes unlock on the Scopes tab. A verified app shows your domain on the
+   ZOREAL ID consent screen and shares your website's sector, so a person has
+   the same `sub` in your website and your app. Verify before you have users:
+   verifying an app that already has users moves them to the domain's sector,
+   and every `sub` you stored for them changes. Until then an app's sector is its
+   bundle identifier.
 
 The `clientId` is public: it ships inside your app, and that is expected. The
 client secret is a server-side secret that never comes near this package or the
@@ -75,29 +127,31 @@ in the dashboard while building and flip it to production when you ship. The
 identities are real either way. There is no mock provider and no hosted test
 issuer to point at.
 
-## How login works on a phone
+## How sign-in works on a phone
 
-There is no redirect. Starting a login creates a **pairing request**, and on
-a phone the SDK opens its link with `Linking.openURL`. The link is a universal
-link (an App Link on Android): with the ZOREAL ID app installed, the app claims
-it and the person approves there.
+There is no redirect. Starting a login creates a **pairing request**, and
+ZOREAL ID approves it; your app's own poll picks up the result. With the
+provider's dialog on (the default), the SDK checks for ZOREAL ID first and
+opens it directly:
 
-**Without ZOREAL ID on the device, the link opens in the browser**, on a
-zoreal.com page that tells the person to install ZOREAL ID and open the link
-again. That page signs nobody in and takes the person out of your app. So
-check whether ZOREAL ID is installed before you start, open it directly when
-it is, and tell the person to get it
-when it is not, without opening anything
-([Is ZOREAL ID on this device?](#is-zoreal-id-on-this-device)).
+- **A phone with ZOREAL ID**: the SDK opens it directly, through a universal
+  link (an App Link on Android). The dialog waits with "Open ZOREAL ID again",
+  "Use another device" and Cancel.
+- **A phone without ZOREAL ID**: the SDK opens nothing. The dialog says ZOREAL
+  ID is not on this phone and offers "Get ZOREAL ID" (the App Store or Google
+  Play), "Use another device", and "I already have ZOREAL ID".
+- **"Use another device"**: the fallback, never the default on a phone. The
+  dialog shows the animated QR for ZOREAL ID on another phone, with "Open
+  ZOREAL ID on this phone" to switch back.
+- **A tablet or TV**: ZOREAL ID ships for phones, so the dialog shows the QR
+  from the first tap.
 
-ZOREAL ID does not switch back to your app after the approval. **Your app's
-own poll completes the flow**: the SDK keeps polling the pairing request, and
-when the person returns to your app (the SDK polls immediately on the
-foreground transition), the approval is already waiting. The provider sets the
-windows, currently five minutes to claim a pairing and five more once it is
-claimed, and the SDK follows the deadline in each answer. Someone who comes
-back much later gets a clean `request_expired` in `onNonOAuthError`, never a
-hang.
+ZOREAL ID does not switch back to your app after the approval; the person
+does, and the SDK polls the moment your app returns to the foreground, so the
+approval is already waiting. The provider sets the windows, currently five
+minutes to claim a pairing and five more once it is claimed, and the SDK
+follows the deadline in each answer. Someone who comes back much later gets a
+clean `request_expired` in `onNonOAuthError`, never a hang.
 
 ## Two flows: pick by who redeems the code
 
@@ -110,57 +164,47 @@ hang.
   returns the ID token, a stable per-user identifier plus proof of
   verification, which your server must still verify before trusting it.
 
-**An app asset cannot request the person's email or name.** Those are Tier B
-scopes, served only to a confidential client on a verified website domain, and
-an app asset has no domain to verify. A native app gets the Tier A claims: the
-pairwise `sub`, the assurance level and the assurance block, plus the age
-thresholds and nationality if you register them.
+**The person's email or name needs a verified app and your backend.** Those
+are Tier B scopes, served only from `/userinfo` to a confidential client of an
+asset whose identity is proven: for an app, verified through your domain's
+`.well-known` files ([Getting your credentials](#getting-your-credentials), step 5). An
+unverified app gets the Tier A claims: the pairwise `sub`, the assurance level
+and the assurance block, plus the age thresholds and nationality if you
+register them.
 
-## Quick start: auth-code (your backend redeems the code)
+## Quick start: the button, with your backend
 
 ```tsx
-import { Pressable, Text } from 'react-native';
-import { ZorealOAuthProvider, useZorealLogin } from '@zoreal/oauth2-react-native';
+import { ZorealLoginButton, ZorealOAuthProvider } from '@zoreal/oauth2-react-native';
 
-function SignInButton() {
-  const login = useZorealLogin({
-    flow: 'auth-code',
-    scope: 'openid',
-    onSuccess: async ({ code, code_verifier, nonce }) => {
-      // Send ALL THREE to your backend over TLS. Your backend calls POST /token
-      // with the code and code_verifier plus its client authentication, and
-      // verifies the ID token (signature, iss, aud, exp and this nonce).
-      await fetch('https://your-api.example/auth/zoreal', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ code, code_verifier, nonce }),
-      });
-    },
-    onNonOAuthError: (e) => console.warn(e.type, e.description),
-  });
-
-  return (
-    <Pressable onPress={login} accessibilityRole="button">
-      <Text>Continue with ZOREAL</Text>
-    </Pressable>
-  );
-}
-
-// Mount the provider once, above anything that signs in.
 export default function App() {
   return (
     <ZorealOAuthProvider clientId="ast_your_asset_id">
-      <SignInButton />
+      <ZorealLoginButton
+        flow="auth-code"
+        onSuccess={async ({ code, code_verifier, nonce }) => {
+          // Send ALL THREE to your backend over TLS. Your backend calls POST /token
+          // with the code and code_verifier plus its client authentication, and
+          // verifies the ID token (signature, iss, aud, exp and this nonce).
+          await fetch('https://your-api.example/auth/zoreal', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ code, code_verifier, nonce }),
+          });
+        }}
+        onError={(e) => console.warn(e.type, e.description)}
+      />
     </ZorealOAuthProvider>
   );
 }
 ```
 
-The backend half is any library from the family table below. On a phone, check
-for ZOREAL ID before you start ([Is ZOREAL ID on this device?](#is-zoreal-id-on-this-device));
-the [complete example](#a-complete-example) shows the whole screen.
+That is the whole app side. The button draws the ZOREAL mark and its label,
+holds itself busy while a sign-in runs, and the provider draws the dialog: the
+check for ZOREAL ID, the store prompt, "Use another device" and the QR. The
+backend half is any library from the family table below.
 
-## Quick start: the button (no backend, pseudonymous)
+## Quick start: no backend, pseudonymous
 
 ```tsx
 import { ZorealOAuthProvider, ZorealLoginButton } from '@zoreal/oauth2-react-native';
@@ -177,74 +221,85 @@ import { ZorealOAuthProvider, ZorealLoginButton } from '@zoreal/oauth2-react-nat
 </ZorealOAuthProvider>
 ```
 
-The button is a plain `Pressable`: no image assets, no fonts, no UI
-dependency, neutral copy ("Continue with ZOREAL" and variants).
+## Your own button, the SDK's dialog
 
-## On this device, on another device, and tablets
+`useZorealLogin` returns the same `login()` the button calls, so any control
+can start a sign-in and the provider still draws the dialog. Put the mark on
+it with `ZorealMark`:
 
-On a phone, sign-in opens ZOREAL ID on the same phone. The QR is for a
-*second* device, and it is never the default on a phone:
+```tsx
+import { Pressable, Text } from 'react-native';
+import { ZorealMark, useZorealLogin } from '@zoreal/oauth2-react-native';
 
-- **Phone with ZOREAL ID**: open it directly. No QR, no dialog in front of it.
-- **Phone without ZOREAL ID**: say so and link to the App Store or Google
-  Play. Do not start a login and do not open the link.
-- **"Use another device"**: the fallback on both, for someone whose ZOREAL ID
-  is on another phone. It starts a QR login, and the QR screen offers "Open
-  ZOREAL ID on this phone" back.
-- **Tablet or TV**: ZOREAL ID ships for phones, so the QR is the way in from
-  the first tap. The SDK picks it by itself on an iPad or a TV
-  (`Platform.isPad`, `Platform.isTV`).
+function ContinueWithZoreal() {
+  const login = useZorealLogin({
+    flow: 'auth-code',
+    onSuccess: async ({ code, code_verifier, nonce }) => {
+      await fetch('https://your-api.example/auth/zoreal', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ code, code_verifier, nonce }),
+      });
+    },
+  });
 
-With `display: 'qr'` the SDK opens no link: it hands you the pairing surface
-through `onPairingStateChange` and polling continues as normal. With
-`display: 'link'` it opens ZOREAL ID. A switch between the two is a new login,
-because the provider binds each pairing to the way it was started: cancel the
-current one, then start the other.
-
-The ZOREAL ID listings are
-`https://apps.apple.com/app/id6810429003` and
-`https://play.google.com/store/apps/details?id=com.zoreal.id`.
-
-### Is ZOREAL ID on this device?
-
-Ask before you start:
-
-```ts
-import { Linking } from 'react-native';
-
-// true, false, or null when the platform would not say.
-async function zorealIdInstalled(): Promise<boolean | null> {
-  try {
-    return await Linking.canOpenURL('zorealid://');
-  } catch {
-    return null;
-  }
+  return (
+    <Pressable onPress={login} accessibilityRole="button" style={{ flexDirection: 'row', alignItems: 'center', gap: 12 }}>
+      <ZorealMark size={22} />
+      <Text>Continue with ZOREAL</Text>
+    </Pressable>
+  );
 }
 ```
 
-`canOpenURL` answers truthfully only for a scheme your app declares. Without
-the declaration it says `false` for an installed ZOREAL ID too, and you would
-tell someone who has the app to install it. Declare it on both platforms:
+## The button
 
-- **iOS**: `zorealid` in `LSApplicationQueriesSchemes` in `Info.plist` (with
-  Expo, `ios.infoPlist.LSApplicationQueriesSchemes` in `app.json`).
-- **Android 11 and later**: a `<queries>` entry in `AndroidManifest.xml` (with
-  Expo, a small config plugin that adds it):
+`ZorealLoginButton` takes the same options as `@zoreal/oauth2-react`'s
+`ZorealLogin`, with the same pixels:
 
-  ```xml
-  <queries>
-    <intent>
-      <action android:name="android.intent.action.VIEW" />
-      <data android:scheme="zorealid" />
-    </intent>
-  </queries>
-  ```
+| Option | Values | Default |
+|---|---|---|
+| `flow` | `'browser-direct'` (onSuccess gets the ID token) or `'auth-code'` (onSuccess gets code, verifier and nonce) | `'browser-direct'` |
+| `theme` | `'outline'` (white), `'filled'` (ZOREAL blue), `'filled_black'` | `'outline'` |
+| `size` | `'large'` (50 high, 22 mark), `'medium'` (42, 20), `'small'` (34, 16) | `'large'` |
+| `text` | `'continue_with'` (translated), `'signin_with'`, `'signup_with'`, `'signin'`, `'verify_with'` | `'continue_with'` |
+| `shape` | `'rectangular'`, `'pill'`, `'square'` | `'rectangular'` |
+| `logo_alignment` | `'center'`, `'left'` | `'center'` |
+| `type` | `'standard'` (mark and label), `'icon'` (mark only) | `'standard'` |
+| `width`, `style`, `click_listener` | a number or percentage, a style merged last, a callback on press | |
 
-The `zorealid://` scheme is only asked about, never opened: the sign-in itself
-always goes through the https link or the QR.
+Every request option (`scope`, `acr_values`, `display`, `intent`,
+`onPairingStateChange` and the rest) works on the button as on the hook. The
+copy is neutral: the button asserts nothing about a person who has not yet
+authenticated.
 
-Treat `null` as "installed" and open the link: telling someone who has ZOREAL
-ID that they do not is worse than a link they can come back from.
+## The dialog
+
+The provider draws it for every sign-in unless you opt out. Its props:
+
+| Prop | What it does |
+|---|---|
+| `locale` | BCP 47. The button label, the dialog and the pairing page follow it. Without it the dialog follows the phone's language. 39 languages ship; anything else reads English. |
+| `theme` | `'auto'` (follows the phone), `'light'` or `'dark'`. |
+| `pairingUI` | `'modal'` (the default) or `'none'`, which hands the whole UI back to you. |
+| `pairingTimeoutMs` | Closes the dialog sooner than the provider's own window. It can shorten the window, never extend it. |
+
+The title follows what the login is for (`intent`, inferred from the scopes
+and `acr_values` when you do not set it): a sign-in, an identification when
+document attributes are asked for, or a presence check.
+
+## Drawing your own UI
+
+With `pairingUI="none"` the SDK draws nothing and asks nothing: on a phone it
+opens the link directly, so the check for ZOREAL ID is yours. Everything you
+need is exported: `isZorealIdInstalled()` (resolves `true`, `false`, or `null`
+when the platform would not say, and needs the declarations from
+[Install](#let-the-app-ask-whether-zoreal-id-is-installed)), `zorealIdStoreUrl()`
+for the listing, and `display: 'link'` or `display: 'qr'` to force a way in.
+Follow the same rules the dialog does: a phone with ZOREAL ID (or `null`)
+opens it, a phone without it is offered the store and never the link, "Use
+another device" is the fallback, and a switch between the two is a new login,
+since the provider binds each pairing to the way it was started.
 
 ### Rendering the QR
 
@@ -321,10 +376,15 @@ minority surface would be backwards.
 
 | Export | What it is |
 |---|---|
-| `ZorealOAuthProvider` | Context: `clientId`, optional `issuer` (sandbox), optional `locale` |
+| `ZorealOAuthProvider` | Context and the dialog host: `clientId`, optional `issuer` (sandbox), `locale`, `theme`, `pairingUI`, `pairingTimeoutMs` |
+| `ZorealLoginButton` | The drop-in button, either flow |
 | `useZorealLogin(options)` | Returns a `login()` function. `flow: 'auth-code'` hands `{ code, code_verifier, nonce, scope, app_state }` to `onSuccess`; the default browser-direct flow exchanges the code itself (public client, PKCE, no secret) and hands over `{ credential, select_by, acr }` |
-| `ZorealLoginButton` | The drop-in `Pressable`, browser-direct flow only |
-| `onPairingStateChange` | Every pairing state, plus `pairUrl` / `qrUrl` / `qrRefreshSeconds` / `cancel`, for caller-rendered UI. `qrUrl` is a fresh frame each time; render the current one |
+| `useZorealAutoLogin(options)` | Silent re-auth (`prompt: 'none'`) for a returning user with a live ZOREAL session; `onUnavailable` is the usual, quiet answer. Never a proof of presence: its `acr` is `zoreal.session` |
+| `ZorealMark`, `ZorealLockup`, `ZOREAL_BLUE` | The mark and the full lockup, for your own controls |
+| `PairingSheet` | The dialog itself, if you host it somewhere other than the provider |
+| `isZorealIdInstalled()`, `zorealIdStoreUrl()` | The check and the store listing, for your own UI |
+| `resolveIntent` | How the dialog decides what a login is for |
+| `onPairingStateChange` | Every pairing state, plus `pairUrl` / `qrUrl` / `qrRefreshSeconds` / `intent` / `cancel`, for a UI of your own. `qrUrl` is a fresh frame each time; render the current one |
 | `zorealLogout()` | Clears SDK-held local state. Local only: it cannot and does not end the holder's ZOREAL session |
 | `hasGrantedAllScopesZoreal` / `hasGrantedAnyScopeZoreal` | Scope checks on a code response |
 
@@ -332,6 +392,7 @@ Errors arrive in two shapes, mirroring the web SDK: `onError` gets OAuth
 protocol errors (`{ error, description }`, the provider's reason verbatim);
 `onNonOAuthError` gets the human outcomes (`request_denied`,
 `request_expired`, `enrolment_abandoned`, `link_failed_to_open`, `unknown`).
+A person who closes the dialog is not an error: nothing is reported.
 
 ## Scopes and claims
 
@@ -345,19 +406,20 @@ its tier:
 | `openid` | `sub`, `iss`, `aud`, `exp`, `iat`, `nonce`, `auth_time`, `acr`, `amr`, and the assurance block | ID token | A | any client |
 | `zoreal.age` | `age_over_13/16/18/21/65` booleans — only the thresholds you registered, never an age or birthdate | ID token | A | any client |
 | `zoreal.nationality` | `nationality` (ISO 3166-1 alpha-3) | ID token | A | any client |
-| `email` | `email`, `email_verified` | `/userinfo` | B | confidential client + verified domain |
-| `profile.name` | `name`, `given_name`, `family_name` | `/userinfo` | B | confidential client + verified domain |
-| `profile.birthdate` | `birthdate` (full ISO 8601 date) | `/userinfo` | B | confidential client + verified domain |
-| `profile.document` | `document_type`, `document_number`, `issuing_country`, `document_expires_on` | `/userinfo` | B | confidential client + verified domain |
-| `profile.portrait` | `portrait` (the chip's facial image; GDPR Article 9 data) | `/userinfo` | C | confidential client + verified domain — *registrable but not served yet* |
+| `email` | `email`, `email_verified` | `/userinfo` | B | confidential client + verified domain (for an app, verified through it) |
+| `profile.name` | `name`, `given_name`, `family_name` | `/userinfo` | B | confidential client + verified domain (for an app, verified through it) |
+| `profile.birthdate` | `birthdate` (full ISO 8601 date) | `/userinfo` | B | confidential client + verified domain (for an app, verified through it) |
+| `profile.document` | `document_type`, `document_number`, `issuing_country`, `document_expires_on` | `/userinfo` | B | confidential client + verified domain (for an app, verified through it) |
+| `profile.portrait` | `portrait` (the chip's facial image; GDPR Article 9 data) | `/userinfo` | C | confidential client + verified domain (for an app, verified through it), *registrable but not served yet* |
 
 - **Tier A** rides in the ID token and is available to every client, so the
   no-backend button can use it.
 - **Tier B and C** are personal data, served only from `/userinfo` to a
   confidential client on a domain you have verified, and never placed in a
   device-side token, which is why they need the auth-code flow and a backend.
-  An app asset has no domain to verify, so it cannot request them. Tier C
-  (`profile.portrait`) is registrable but the provider does not serve it yet.
+  For an app asset the proof is its verification through your website's
+  domain. Tier C (`profile.portrait`) is registrable but the provider does not
+  serve it yet.
 - **Age thresholds are a fixed set** — 13, 16, 18, 21, 65 — that you register on
   the asset. A threshold you did not register mints no claim, so its
   `age_over_N` is absent rather than `false` (a backend age check returns `nil`
@@ -502,7 +564,7 @@ its single `onError`, shaped as a `NonOAuthError`.)
 
 | Surface | Callback | Code / type | Meaning |
 |---|---|---|---|
-| `/pair` | `onError` | `invalid_scope` | A scope not on the asset's allow list, or a Tier B scope from a public client or an app asset |
+| `/pair` | `onError` | `invalid_scope` | A scope not on the asset's allow list, or a Tier B scope from a public client or an app not verified through your domain |
 | `/pair` | `onError` | `invalid_request` | Missing PKCE/nonce, an unverified sector, a `redirect_uri` the asset did not register (pass none), JavaScript origins registered on the asset, or an unknown `acr_values` |
 | `/pair` | `onError` | `login_required` | `prompt: 'none'` with no silent session to resume — the expected quiet outcome, not a failure |
 | pairing | `onNonOAuthError` | `request_denied` | The holder declined in their ZOREAL ID app — **not an error to alarm on**; offer to try again |
@@ -527,12 +589,15 @@ while the provider's code travels verbatim in `error` / `description`, so a
 `/token` code such as `invalid_grant` can appear there in browser-direct mode
 even though the union centres on the `/pair` codes.
 
-## A complete example
+## A complete example with your own UI
 
-The auth-code flow, end to end: the check for ZOREAL ID, ZOREAL ID opened
-directly, the prompt to get it when it is missing, "Use another device" as the
-fallback, the QR on a tablet, and the hand-off to your backend. Nothing here
-verifies the token. That is the backend's job, and it is not optional.
+The button and the provider's dialog are the whole integration for most apps
+(see the quick start). This is the other end: `pairingUI="none"` and every
+screen drawn by the app, following the same rules the dialog does. The check
+for ZOREAL ID, ZOREAL ID opened directly, the prompt to get it when it is
+missing, "Use another device" as the fallback, the QR on a tablet, and the
+hand-off to your backend. Nothing here verifies the token. That is the
+backend's job, and it is not optional.
 
 It renders the QR with `react-native-svg` (`npm install react-native-svg`).
 
@@ -541,28 +606,17 @@ import { useState } from 'react';
 import { Linking, Modal, Platform, Pressable, Text, View } from 'react-native';
 import { SvgUri } from 'react-native-svg';
 import {
+  ZorealMark,
   ZorealOAuthProvider,
+  isZorealIdInstalled,
   useZorealLogin,
+  zorealIdStoreUrl,
   type AuthCodeFlowOptions,
   type NonOAuthError,
   type PairingState,
 } from '@zoreal/oauth2-react-native';
 
-// Needs the zorealid query declared on both platforms (see above), or it
-// answers false for an installed ZOREAL ID.
-async function zorealIdInstalled(): Promise<boolean | null> {
-  try {
-    return await Linking.canOpenURL('zorealid://');
-  } catch {
-    return null;
-  }
-}
-
 const isPad = Platform.OS === 'ios' && Platform.isPad;
-const zorealIdListing =
-  Platform.OS === 'ios'
-    ? 'https://apps.apple.com/app/id6810429003'
-    : 'https://play.google.com/store/apps/details?id=com.zoreal.id';
 
 function SignInScreen() {
   const [pairing, setPairing] = useState<PairingState | null>(null);
@@ -625,7 +679,8 @@ function SignInScreen() {
     setMessage(null);
     // A tablet has no ZOREAL ID of its own: the QR is its way in.
     if (isPad) return signInWithCode();
-    const installed = await zorealIdInstalled();
+    // Needs the zorealid query declared (see Install), or it answers false.
+    const installed = await isZorealIdInstalled();
     setHasZorealId(installed);
     // Only a firm "no" stops here, and then nothing is opened or started.
     if (installed === false) return setMissing(true);
@@ -648,7 +703,8 @@ function SignInScreen() {
 
   return (
     <View>
-      <Pressable onPress={start} accessibilityRole="button">
+      <Pressable onPress={start} accessibilityRole="button" style={{ flexDirection: 'row', alignItems: 'center', gap: 12 }}>
+        <ZorealMark size={22} />
         <Text>Continue with ZOREAL</Text>
       </Pressable>
       {message && <Text>{message}</Text>}
@@ -660,7 +716,7 @@ function SignInScreen() {
             ZOREAL ID is not on this phone. Get it, set it up, and try again, or use
             ZOREAL ID on another phone.
           </Text>
-          <Pressable onPress={() => Linking.openURL(zorealIdListing)} accessibilityRole="button">
+          <Pressable onPress={() => Linking.openURL(zorealIdStoreUrl())} accessibilityRole="button">
             <Text>Get ZOREAL ID</Text>
           </Pressable>
           <Pressable
@@ -718,7 +774,7 @@ function SignInScreen() {
 // Mount the provider once, above anything that logs in:
 export default function App() {
   return (
-    <ZorealOAuthProvider clientId="ast_your_asset_id">
+    <ZorealOAuthProvider clientId="ast_your_asset_id" pairingUI="none">
       <SignInScreen />
     </ZorealOAuthProvider>
   );
@@ -754,9 +810,12 @@ export default function App() {
   `/userinfo`, on your backend.
 - **The access token lives 10 minutes.** Your backend should read `/userinfo`
   while handling the login, not store the token for later.
-- **`sub` is pairwise per verified domain.** It is the right account key, and
-  it is derived from your registered domain: changing your asset's domain
-  rotates every `sub` you have stored. Plan domain changes as a migration.
+- **`sub` is pairwise per sector.** It is the right account key. An app
+  verified through your domain shares that domain's sector, so the same person
+  has the same `sub` in your website and your app; an unverified app's sector
+  is its bundle identifier. Changing either (the domain, the bundle identifier,
+  or verifying an app that already has users) changes every `sub` you have
+  stored, so plan it as a migration.
 - **Email is a deliberate choice.** It is gated behind a confidential client
   precisely because a shared email defeats the unlinkability the pairwise
   `sub` provides. Request it because you need it, not because the checkbox is

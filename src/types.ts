@@ -1,9 +1,8 @@
 /**
  * The public types of @zoreal/oauth2-react-native.
  *
- * The API mirrors @zoreal/oauth2-react (which itself mirrors
- * @react-oauth/google), so a team moving between the web and native SDKs
- * ports by renaming imports. The one taxonomy difference is honest to the
+ * The API matches @zoreal/oauth2-react, so a team moving between the web
+ * and native SDKs ports by renaming imports. The one taxonomy difference is honest to the
  * platform: a native app has no popup to fail, so the popup error types are
  * replaced by the single launch failure a native app can have.
  */
@@ -34,6 +33,28 @@ export type NonOAuthError = {
   /** The provider's own reason string. Render it. Never substitute a friendlier guess. */
   description?: string;
 };
+
+/**
+ * What the pairing dialog says the login is for. Inferred from the request
+ * when not set (resolveIntent): document attributes are an identification,
+ * the identifier alone with a liveness capture is a presence check, anything
+ * else is a sign-in.
+ */
+export type LoginIntent = 'sign-in' | 'identify' | 'presence';
+
+/** Colour scheme of the SDK's pairing dialog. 'auto' follows the phone. */
+export type ZorealTheme = 'auto' | 'light' | 'dark';
+
+/**
+ * Who draws the pairing while it is open.
+ *
+ * 'modal' (the default) means the SDK does, in its own dialog: on a phone it
+ * asks whether ZOREAL ID is installed, opens it or offers the store, and
+ * offers "Use another device"; on a tablet, or after that switch, it draws
+ * the animated QR. 'none' hands all of that back to you through
+ * onPairingStateChange, and the SDK opens the link without asking first.
+ */
+export type PairingUI = 'modal' | 'none';
 
 /** How the holder reached this login. */
 export type SelectBy = 'qr' | 'app_link' | 'device' | 'session';
@@ -82,6 +103,8 @@ export interface PairingState {
   qrRefreshSeconds?: number;
   /** True when the flow opened the app link (same device) rather than showing a QR. */
   appLink?: boolean;
+  /** What the dialog says the code is for, resolved once per login. */
+  intent?: LoginIntent;
   /** Abandons this pairing: stops the poll. Wire it to your UI's cancel control. */
   cancel?: () => void;
 }
@@ -113,6 +136,12 @@ export interface ZorealLoginRequestOptions {
    * login that cannot be completed, not a cosmetic mismatch.
    */
   display?: 'auto' | 'qr' | 'link';
+  /**
+   * What the dialog tells the holder they are approving. Set it when the
+   * scope does not say: a presence check that asks for a name is still not a
+   * sign-in. See LoginIntent for what is inferred when this is omitted.
+   */
+  intent?: LoginIntent;
   /** Called on each pairing state change. Drive your own UI from this if you render one. */
   onPairingStateChange?: (state: PairingState) => void;
 }
@@ -122,10 +151,11 @@ export interface ZorealButtonConfiguration {
   theme?: 'outline' | 'filled' | 'filled_black';
   size?: 'large' | 'medium' | 'small';
   /**
-   * All four are neutral. The button asserts nothing about a person who has not yet
-   * authenticated; there is no 'verified_human' variant.
+   * All five are neutral. The button asserts nothing about a person who has
+   * not yet authenticated; there is no 'verified_human' variant. 'verify_with'
+   * names the act the button starts, for surfaces where the login IS a check.
    */
-  text?: 'continue_with' | 'signin_with' | 'signup_with' | 'signin';
+  text?: 'continue_with' | 'signin_with' | 'signup_with' | 'signin' | 'verify_with';
   shape?: 'rectangular' | 'pill' | 'square';
   logo_alignment?: 'left' | 'center';
   width?: number | `${number}%`;
@@ -179,4 +209,17 @@ export interface AuthCodeFlowOptions extends ZorealLoginRequestOptions {
    * asset registers none.
    */
   redirect_uri?: string;
+}
+
+export interface UseZorealAutoLoginOptions {
+  onSuccess: (response: ZorealCredentialResponse) => void;
+  /**
+   * Called when no silent session was available, which is the common case for a
+   * first-time or non-returning user. This is not an error and should not be
+   * surfaced.
+   */
+  onUnavailable?: () => void;
+  onError?: (error: NonOAuthError) => void;
+  disabled?: boolean;
+  scope?: string;
 }
