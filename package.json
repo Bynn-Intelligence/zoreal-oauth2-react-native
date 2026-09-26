@@ -1,6 +1,6 @@
 {
   "name": "@zoreal/oauth2-react-native",
-  "version": "0.2.0-0",
+  "version": "0.2.0",
   "description": "Login with ZOREAL for React Native. A ZOREAL Verified Proof-of-Human behind every sign-in.",
   "license": "MIT",
   "repository": {
