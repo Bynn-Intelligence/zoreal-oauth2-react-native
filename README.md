@@ -84,9 +84,9 @@ it and the person approves there.
 
 **Without ZOREAL ID on the device, the link opens in the browser**, on a
 zoreal.com page that tells the person to install ZOREAL ID and open the link
-again. That page signs nobody in and takes the person out of your app. So do
-what BankID asks of its relying parties: check whether ZOREAL ID is installed
-before you start, open it directly when it is, and tell the person to get it
+again. That page signs nobody in and takes the person out of your app. So
+check whether ZOREAL ID is installed before you start, open it directly when
+it is, and tell the person to get it
 when it is not, without opening anything
 ([Is ZOREAL ID on this device?](#is-zoreal-id-on-this-device)).
 
